@@ -20,6 +20,7 @@ const (
 	Subscribe
 	Unsubscribe
 	Message
+	Pong
 )
 
 // SubClient wraps a Redis client to provide convenience methods for Pub/Sub
@@ -74,6 +75,12 @@ func (c *SubClient) PUnsubscribe(patterns ...interface{}) *SubResp {
 	return c.filterMessages("PUNSUBSCRIBE", patterns...)
 }
 
+// Ping will send a ping command on the connection, and returns a Pong response
+// (or error)
+func (c *SubClient) Ping() *SubResp {
+	return c.filterMessages("PING")
+}
+
 // Receive returns the next publish resp on the Redis client. It is possible
 // Receive will timeout, and the *SubResp will be an Error. You can use the
 // Timeout() method on SubResp to easily determine if that is the case. If this
@@ -92,15 +99,16 @@ func (c *SubClient) receive(skipBuffer bool) *SubResp {
 }
 
 func (c *SubClient) filterMessages(cmd string, names ...interface{}) *SubResp {
-	r := c.Client.Cmd(cmd, names...)
-	var sr *SubResp
-	for i := 0; i < len(names); i++ {
-		// If nil we know this is the first loop
-		if sr == nil {
-			sr = c.parseResp(r)
-		} else {
-			sr = c.receive(true)
-		}
+	sr := c.parseResp(c.Client.Cmd(cmd, names...))
+	i := 0
+	if sr.Type == Message {
+		c.messages.PushBack(sr)
+		i--
+	} else {
+		i++
+	}
+	for ; i < len(names); i++ {
+		sr = c.receive(true)
 		if sr.Type == Message {
 			c.messages.PushBack(sr)
 			i--
@@ -116,7 +124,7 @@ func (c *SubClient) parseResp(resp *redis.Resp) *SubResp {
 	switch {
 	case resp.IsType(redis.Array):
 		elems, _ = resp.Array()
-		if len(elems) < 3 {
+		if len(elems) < 2 {
 			sr.Err = errors.New("resp is not formatted as a subscription resp")
 			sr.Type = Error
 			return sr
@@ -142,6 +150,9 @@ func (c *SubClient) parseResp(resp *redis.Resp) *SubResp {
 
 	//first element
 	switch rtype {
+	case "pong":
+		sr.Type = Pong
+
 	case "subscribe", "psubscribe":
 		sr.Type = Subscribe
 		count, err := elems[2].Int()

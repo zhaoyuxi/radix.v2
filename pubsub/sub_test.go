@@ -124,3 +124,92 @@ func TestPSubscribe(t *T) {
 	assert.Equal(t, Unsubscribe, sr.Type)
 	assert.Equal(t, 0, sr.SubCount)
 }
+
+func TestMultiSubscribe(t *T) {
+	pub, sub := testClients(t, 10*time.Second)
+
+	ch1, ch2 := randStr(), randStr()
+
+	sr := sub.Subscribe(ch1, ch2)
+	require.Nil(t, sr.Err)
+	assert.Equal(t, Subscribe, sr.Type)
+	assert.Equal(t, 2, sr.SubCount)
+
+	subCh := make(chan *SubResp)
+
+	assertPub := func(ch, msg string) {
+		go func() { subCh <- sub.Receive() }()
+
+		require.Nil(t, pub.Cmd("PUBLISH", ch, msg).Err)
+
+		select {
+		case sr = <-subCh:
+		case <-time.After(10 * time.Second):
+			t.Fatal("Took too long to Receive message")
+		}
+
+		require.Nil(t, sr.Err)
+		assert.Equal(t, Message, sr.Type)
+		assert.Equal(t, msg, sr.Message)
+		assert.Equal(t, ch, sr.Channel)
+	}
+
+	assertPub(ch1, randStr())
+	assertPub(ch2, randStr())
+
+	sr = sub.Unsubscribe(ch1)
+	require.Nil(t, sr.Err)
+	assert.Equal(t, Unsubscribe, sr.Type)
+	assert.Equal(t, 1, sr.SubCount)
+
+	// this should do nothing
+	require.Nil(t, pub.Cmd("PUBLISH", ch1, randStr()).Err)
+
+	assertPub(ch2, randStr())
+}
+
+func TestPing(t *T) {
+	pub, sub := testClients(t, 10*time.Second)
+	ch := randStr()
+
+	sr := sub.Subscribe(ch)
+	require.Nil(t, sr.Err)
+	assert.Equal(t, Subscribe, sr.Type)
+	assert.Equal(t, 1, sr.SubCount)
+
+	numPubs := 5
+	msgs := make(chan string, numPubs)
+	go func() {
+		for i := 0; i < numPubs; i++ {
+			msg := randStr()
+			require.Nil(t, pub.Cmd("PUBLISH", ch, msg).Err)
+			msgs <- msg
+			time.Sleep(100 * time.Millisecond)
+		}
+	}()
+
+	assertPing := func() {
+		sr := sub.Ping()
+		require.Nil(t, sr.Err)
+		assert.Equal(t, Pong, sr.Type)
+	}
+
+	assertRcv := func(msg string) {
+		sr := sub.Receive()
+		require.Nil(t, sr.Err)
+		assert.Equal(t, Message, sr.Type)
+		assert.Equal(t, ch, sr.Channel)
+		assert.Equal(t, msg, sr.Message)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	assertPing()
+	assertRcv(<-msgs)
+	assertRcv(<-msgs)
+	assertPing()
+	assertRcv(<-msgs)
+	assertRcv(<-msgs)
+	assertPing()
+	assertRcv(<-msgs)
+	assertPing()
+}
