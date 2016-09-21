@@ -1,8 +1,9 @@
 package pubsub
 
 import (
-	"fmt"
-	"testing"
+	"crypto/rand"
+	"encoding/hex"
+	. "testing"
 	"time"
 
 	"github.com/mediocregopher/radix.v2/redis"
@@ -10,7 +11,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testClients(t *testing.T, timeout time.Duration) (*redis.Client, *SubClient) {
+func randStr() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(b)
+}
+
+func testClients(t *T, timeout time.Duration) (*redis.Client, *SubClient) {
 	pub, err := redis.DialTimeout("tcp", "localhost:6379", timeout)
 	require.Nil(t, err)
 
@@ -21,7 +30,7 @@ func testClients(t *testing.T, timeout time.Duration) (*redis.Client, *SubClient
 }
 
 // Test that pubsub is still usable after a timeout
-func TestTimeout(t *testing.T) {
+func TestTimeout(t *T) {
 	go func() {
 		time.Sleep(10 * time.Second)
 		t.Fatal()
@@ -50,146 +59,68 @@ func TestTimeout(t *testing.T) {
 	assert.False(t, r.Timeout())
 }
 
-func TestSubscribe(t *testing.T) {
-	pub, err := redis.DialTimeout("tcp", "localhost:6379", time.Duration(10)*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestSubscribe(t *T) {
+	pub, sub := testClients(t, 10*time.Second)
 
-	client, err := redis.DialTimeout("tcp", "localhost:6379", time.Duration(10)*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sub := NewSubClient(client)
-
-	channel := "subTestChannel"
-	message := "Hello, World!"
+	channel := randStr()
+	message := randStr()
 
 	sr := sub.Subscribe(channel)
-	if sr.Err != nil {
-		t.Fatal(sr.Err)
-	}
-
-	if sr.Type != Subscribe {
-		t.Fatal("Did not receive a subscribe reply")
-	}
-
-	if sr.SubCount != 1 {
-		t.Fatal(fmt.Sprintf("Unexpected subscription count, Expected: 0, Found: %d", sr.SubCount))
-	}
-
-	r := pub.Cmd("PUBLISH", channel, message)
-	if r.Err != nil {
-		t.Fatal(r.Err)
-	}
+	require.Nil(t, sr.Err)
+	assert.Equal(t, Subscribe, sr.Type)
+	assert.Equal(t, 1, sr.SubCount)
 
 	subChan := make(chan *SubResp)
-	go func() {
-		subChan <- sub.Receive()
-	}()
+	go func() { subChan <- sub.Receive() }()
+
+	require.Nil(t, pub.Cmd("PUBLISH", channel, message).Err)
 
 	select {
 	case sr = <-subChan:
-	case <-time.After(time.Duration(10) * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("Took too long to Receive message")
 	}
 
-	if sr.Err != nil {
-		t.Fatal(sr.Err)
-	}
-
-	if sr.Type != Message {
-		t.Fatal("Did not receive a message reply")
-	}
-
-	if sr.Message != message {
-		t.Fatal(fmt.Sprintf("Did not recieve expected message '%s', instead got: '%s'", message, sr.Message))
-	}
+	require.Nil(t, sr.Err)
+	assert.Equal(t, Message, sr.Type)
+	assert.Equal(t, message, sr.Message)
 
 	sr = sub.Unsubscribe(channel)
-	if sr.Err != nil {
-		t.Fatal(sr.Err)
-	}
-
-	if sr.Type != Unsubscribe {
-		t.Fatal("Did not receive a unsubscribe reply")
-	}
-
-	if sr.SubCount != 0 {
-		t.Fatal(fmt.Sprintf("Unexpected subscription count, Expected: 0, Found: %d", sr.SubCount))
-	}
+	require.Nil(t, sr.Err)
+	assert.Equal(t, Unsubscribe, sr.Type)
+	assert.Equal(t, 0, sr.SubCount)
 }
 
-func TestPSubscribe(t *testing.T) {
-	pub, err := redis.DialTimeout("tcp", "localhost:6379", time.Duration(10)*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestPSubscribe(t *T) {
+	pub, sub := testClients(t, 10*time.Second)
 
-	client, err := redis.DialTimeout("tcp", "localhost:6379", time.Duration(10)*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sub := NewSubClient(client)
-
-	pattern := "patternThen*"
-	message := "Hello, World!"
+	pattern := randStr() + "*"
+	message := randStr()
 
 	sr := sub.PSubscribe(pattern)
-	if sr.Err != nil {
-		t.Fatal(sr.Err)
-	}
-
-	if sr.Type != Subscribe {
-		t.Fatal("Did not receive a subscribe reply")
-	}
-
-	if sr.SubCount != 1 {
-		t.Fatal(fmt.Sprintf("Unexpected subscription count, Expected: 0, Found: %d", sr.SubCount))
-	}
-
-	r := pub.Cmd("PUBLISH", "patternThenHello", message)
-	if r.Err != nil {
-		t.Fatal(r.Err)
-	}
+	require.Nil(t, sr.Err)
+	assert.Equal(t, Subscribe, sr.Type)
+	assert.Equal(t, 1, sr.SubCount)
 
 	subChan := make(chan *SubResp)
-	go func() {
-		subChan <- sub.Receive()
-	}()
+	go func() { subChan <- sub.Receive() }()
+
+	r := pub.Cmd("PUBLISH", pattern+"_"+randStr(), message)
+	require.Nil(t, r.Err)
 
 	select {
 	case sr = <-subChan:
-	case <-time.After(time.Duration(10) * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("Took too long to Receive message")
 	}
 
-	if sr.Err != nil {
-		t.Fatal(sr.Err)
-	}
-
-	if sr.Type != Message {
-		t.Fatal("Did not receive a message reply")
-	}
-
-	if sr.Pattern != pattern {
-		t.Fatal(fmt.Sprintf("Did not recieve expected pattern '%s', instead got: '%s'", pattern, sr.Pattern))
-	}
-
-	if sr.Message != message {
-		t.Fatal(fmt.Sprintf("Did not recieve expected message '%s', instead got: '%s'", message, sr.Message))
-	}
+	require.Nil(t, sr.Err)
+	assert.Equal(t, Message, sr.Type)
+	assert.Equal(t, pattern, sr.Pattern)
+	assert.Equal(t, message, sr.Message)
 
 	sr = sub.PUnsubscribe(pattern)
-	if sr.Err != nil {
-		t.Fatal(sr.Err)
-	}
-
-	if sr.Type != Unsubscribe {
-		t.Fatal("Did not receive a unsubscribe reply")
-	}
-
-	if sr.SubCount != 0 {
-		t.Fatal(fmt.Sprintf("Unexpected subscription count, Expected: 0, Found: %d", sr.SubCount))
-	}
+	require.Nil(t, sr.Err)
+	assert.Equal(t, Unsubscribe, sr.Type)
+	assert.Equal(t, 0, sr.SubCount)
 }
