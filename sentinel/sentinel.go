@@ -188,16 +188,25 @@ func NewClientCustom(
 }
 
 func (c *Client) subSpin() {
+	alwaysErr := func(err error) {
+		select {
+		case c.alwaysErrCh <- &ClientError{err: err, SentinelErr: true}:
+		case <-c.closeCh:
+		}
+	}
+
 	for {
+		if err := c.subClient.Ping().Err; err != nil {
+			alwaysErr(err)
+			return
+		}
+
 		r := c.subClient.Receive()
 		if r.Timeout() {
 			continue
 		}
 		if r.Err != nil {
-			select {
-			case c.alwaysErrCh <- &ClientError{err: r.Err, SentinelErr: true}:
-			case <-c.closeCh:
-			}
+			alwaysErr(r.Err)
 			return
 		}
 		sMsg := strings.Split(r.Message, " ")
