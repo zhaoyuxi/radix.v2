@@ -1,4 +1,10 @@
-# The rulez
+# MAKE AN ISSUE BEFORE YOU MAKE A PULL REQUEST PLEASE
+
+It's hard to tell someone to throw away work they've done already, it's easy to
+tell them beforehand there's already a solution to their problem and they don't
+need to write a PR.
+
+# Other rules
 
 There's a couple. They're not even really rules, more just telling you what you
 can expect.
@@ -9,11 +15,6 @@ can expect.
 
 * Pull requests for small bug fixes have the same rules as issues, just submit
   it and I'll get to it ASAP.
-
-* I'm very hesitant to change the actual API in any way normally. But I also
-  don't like telling people to throw away work they've already done. So please,
-  before you go adding a new feature and submitting a PR, please submit an issue
-  so we can possibly save you some work.
 
 * The API never breaks. All PRs which aren't backwards compatible will not be
   accepted. Similarly, if I do commit something which isn't backwards compatible
