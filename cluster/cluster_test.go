@@ -44,7 +44,7 @@ func randStr() string {
 func keyForNode(c *Cluster, addr string) string {
 	for {
 		k := randStr()
-		if addr == keyToAddr(k, c.mapping) {
+		if addr == keyToAddr(k, &c.mapping) {
 			return k
 		}
 	}

@@ -205,7 +205,7 @@ func (c *Cluster) getConn(key, addr string) (*redis.Client, error) {
 	respCh := make(chan *resp)
 	c.callCh <- func(c *Cluster) {
 		if key != "" {
-			addr = keyToAddr(key, c.mapping)
+			addr = keyToAddr(key, &c.mapping)
 		}
 
 		var err error
@@ -555,7 +555,7 @@ func redirectInfo(msg string) (int, string) {
 	return slot, addr
 }
 
-func keyToAddr(key string, mapping mapping) string {
+func keyToAddr(key string, mapping *mapping) string {
 	if start := strings.Index(key, "{"); start >= 0 {
 		if end := strings.Index(key[start+2:], "}"); end >= 0 {
 			key = key[start+1 : start+2+end]
@@ -610,7 +610,7 @@ func (c *Cluster) GetEvery() (map[string]*redis.Client, error) {
 func (c *Cluster) GetAddrForKey(key string) string {
 	respCh := make(chan string)
 	c.callCh <- func(c *Cluster) {
-		respCh <- keyToAddr(key, c.mapping)
+		respCh <- keyToAddr(key, &c.mapping)
 	}
 	return <-respCh
 }
